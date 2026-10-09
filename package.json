@@ -2,7 +2,7 @@
   "name": "bytedance-ip-feed",
   "version": "1.0.0",
   "private": true,
-  "description": "Auto-refreshing IP feed for ByteDance / TikTok / Volcengine / BytePlus / Lark networks",
+  "description": "Auto-refreshing IP classification feed: ByteDance, cloud, hosting, VPN, proxy, crawler and relay networks",
   "engines": { "node": ">=18" },
   "scripts": {
     "build": "node build-feed.js",

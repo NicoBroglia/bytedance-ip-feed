@@ -1,0 +1,20 @@
+[
+  { "provider": "google", "category": "crawler", "tag": "crawler", "holder": "Google LLC (Googlebot)",
+    "source": "googlebot", "format": "google-json",
+    "url": "https://developers.google.com/static/search/apis/ipranges/googlebot.json" },
+  { "provider": "google", "category": "crawler", "tag": "crawler", "holder": "Google LLC (special crawlers)",
+    "source": "google-special-crawlers", "format": "google-json",
+    "url": "https://developers.google.com/static/search/apis/ipranges/special-crawlers.json" },
+  { "provider": "google", "category": "crawler", "tag": "crawler", "holder": "Google LLC (user-triggered fetchers)",
+    "source": "google-user-fetchers", "format": "google-json",
+    "url": "https://developers.google.com/static/search/apis/ipranges/user-triggered-fetchers.json" },
+  { "provider": "bing", "category": "crawler", "tag": "crawler", "holder": "Microsoft (Bingbot)",
+    "source": "bingbot", "format": "google-json",
+    "url": "https://www.bing.com/toolbox/bingbot.json" },
+  { "provider": "apple", "category": "crawler", "tag": "crawler", "holder": "Apple Inc. (Applebot)",
+    "source": "applebot", "format": "google-json",
+    "url": "https://search.developer.apple.com/applebot.json" },
+  { "provider": "icloud-private-relay", "category": "relay", "tag": "private-relay", "holder": "Apple iCloud Private Relay (egress)",
+    "source": "apple-relay", "format": "csv", "collapse": true,
+    "url": "https://mask-api.icloud.com/egress-ip-ranges.csv" }
+]

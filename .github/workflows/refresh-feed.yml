@@ -1,4 +1,4 @@
-name: Refresh ByteDance IP feed
+name: Refresh IP classification feed
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       allow_shrink:
-        description: 'Accept a >30% drop in prefix count (only after checking it is genuine)'
+        description: 'Accept a >30% drop in any provider (only after checking it is genuine)'
         type: boolean
         default: false
 
@@ -35,39 +35,43 @@ jobs:
           ALLOW_SHRINK: ${{ inputs.allow_shrink && '1' || '0' }}
         run: node build-feed.js
 
-      # build-feed.js only rewrites files when the sha256 of the prefix list changed,
+      # build-feed.js only rewrites files when the sha256 of the prefix lists changed,
       # so an empty diff here means the prefixes are identical to the last commit.
       - name: Commit if prefixes changed
         id: commit
         run: |
-          FILES="bytedance-feed.json bytedance-feed.lastgood.json bytedance-feed.txt bytedance-feed.announced.txt"
+          FILES="bytedance-feed.json bytedance-feed.lastgood.json feed.all.txt feed.all.lastgood.txt"
           if [ -z "$(git status --porcelain -- $FILES)" ]; then
             echo "No prefix changes; nothing to commit."
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          COUNT=$(node -p "require('./bytedance-feed.json').prefix_count")
-          HASH=$(node -p "require('./bytedance-feed.json').content_hash.slice(0, 12)")
+          SUMMARY=$(node -p "const f = require('./bytedance-feed.json'); f.prefix_count + ' ByteDance + ' + f.networks.prefix_count + ' network prefixes (sha256 ' + f.content_hash.slice(0, 12) + ')'")
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add $FILES
-          git commit -m "feed: ${COUNT} prefixes (sha256 ${HASH})"
+          git commit -m "feed: ${SUMMARY}"
           git push
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Summary
         if: always()
-        run: |
-          if [ -f bytedance-feed.json ]; then
-            node -e '
-              const f = require("./bytedance-feed.json");
-              const tags = {};
-              for (const p of f.prefixes) tags[p.tag] = (tags[p.tag] || 0) + 1;
-              console.log(`### ByteDance feed\n\n- generated_at: ${f.generated_at}\n- prefixes: ${f.prefix_count}` +
-                ` (${f.prefixes.filter(p => p.announced).length} announced in BGP)\n- sha256: \`${f.content_hash}\`` +
-                `\n- changed this run: ${process.env.CHANGED || "no (build failed or unchanged)"}\n\n| tag | prefixes |\n|---|---|\n` +
-                Object.entries(tags).map(([t, n]) => `| ${t} | ${n} |`).join("\n"));
-            ' >> "$GITHUB_STEP_SUMMARY"
-          fi
         env:
           CHANGED: ${{ steps.commit.outputs.changed }}
+        run: |
+          [ -f bytedance-feed.json ] || exit 0
+          node -e '
+            const f = require("./bytedance-feed.json");
+            const n = f.networks;
+            const lines = [
+              "### IP classification feed", "",
+              "- generated_at: " + f.generated_at,
+              "- ByteDance prefixes: " + f.prefix_count + " (" + f.prefixes.filter((p) => p.announced).length + " announced in BGP)",
+              "- network prefixes: " + n.prefix_count,
+              "- sha256: " + f.content_hash,
+              "- changed this run: " + (process.env.CHANGED || "no (build failed or unchanged)"),
+              "", "| provider | category | prefixes |", "|---|---|---|",
+              ...Object.entries(n.providers).map(([p, i]) => "| " + p + " | " + i.category + " | " + i.count + " |"),
+            ];
+            console.log(lines.join("\n"));
+          ' >> "$GITHUB_STEP_SUMMARY"

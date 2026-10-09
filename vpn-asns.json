@@ -1,0 +1,8 @@
+[
+  { "provider": "nordvpn", "category": "vpn", "tag": "vpn", "holder": "PacketHub S.A. (Nord Security)",
+    "asns": [136787] },
+  { "provider": "mullvad", "category": "vpn", "tag": "vpn", "holder": "Mullvad VPN AB",
+    "asns": [216025, 197141] },
+  { "provider": "protonvpn", "category": "vpn", "tag": "vpn", "holder": "Proton AG",
+    "asns": [209103, 199218, 62371] }
+]
