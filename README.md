@@ -53,10 +53,17 @@ A full build takes under a minute.
 - **Canonical CIDRs:** host bits are zeroed and IPv6 uses RFC 5952 notation. IPv4 /8–/32 and IPv6 /16–/128 only.
 - **Overlaps stay distinct.** A ByteDance prefix inside Oracle space, or a Bingbot range inside Azure, keeps
   one line per provider.
+- **Strict by default:** only ByteDance prefixes that can match live traffic are included. See
+  [Strict mode](#strict-mode-strict_announced) below.
 - **Identical CIDRs:** when the same CIDR appears under several providers, the lines are ordered by category
-  priority: `bytedance` > `crawler` > `relay` > `vpn` > `proxy` > `cloud` > `hosting`. A loader that keeps
-  the first line per CIDR gets the most specific meaning. A loader that keeps the last line gets the most
-  generic one. Pick deliberately.
+  priority: `bytedance` > `crawler` > `relay` > `vpn` > `proxy` > `cloud` > `hosting`. ByteDance always
+  wins ties over cloud. For example, `139.177.229.0/24 bytedance` comes before `139.177.229.0/24 oracle`.
+  **The intended consumer is a first-line-wins loader:** when a CIDR is already loaded, ignore later lines
+  for it.
+- **Line order only resolves identical CIDRs.** When prefixes differ in length, a longest-prefix trie
+  returns the more specific one whatever the order. For example, an IP in `101.45.244.0/24 oracle` matches
+  Oracle, not the enclosing `101.45.0.0/16 bytedance`. The ByteDance /16 still covers the rest of its
+  range. `lookup.js explain` lists both.
 - **Nesting:** a longest-prefix trie returns the most specific network, e.g. a Private Relay /26 inside a
   Cloudflare /24 (e.g. `104.28.28.0/26` inside `104.28.28.0/24`).
 
@@ -105,6 +112,26 @@ Note that most RPKI-valid-but-unannounced entries are Volcengine. It pre-registe
 blocks and covers them with wide-`maxLength` ROAs. Those prefixes are authorised and ByteDance-owned, but
 not visible in global BGP; they may be unused or routed only inside China. `explain` reports them with
 `medium` confidence.
+
+#### Strict mode (`STRICT_ANNOUNCED`)
+
+The JSON keeps the full ByteDance set. Each entry has a `strict` flag that is `true` when the prefix can
+match live traffic. That means one of:
+
+- it is **announced in BGP** by a ByteDance ASN;
+- it is **hand-curated** in `known-usage.json`;
+- it is **RPKI-valid and overlaps a cloud prefix**. This keeps ByteDance space that a cloud routes for it,
+  e.g. `139.177.224.0/19`, which Oracle announces in pieces (TikTok US on Oracle Cloud).
+
+With `STRICT_ANNOUNCED=1`, the default, `feed.all.txt` gets only the `strict: true` ByteDance entries:
+about 960 of about 13,000. Set `STRICT_ANNOUNCED=0` to put every ByteDance entry in the txt (about 140k
+lines instead of about 128k). The network set is never filtered.
+
+**What the strict file drops:** almost every ByteDance entry that `explain` rates `medium` confidence.
+These are RPKI-only prefixes, mainly Volcengine subdivisions that are registered and authorised but not
+routed, so they can never match a live IP. The exceptions stay in: RPKI-only prefixes overlapping a cloud,
+and curated entries. `explain` still finds the dropped prefixes because it reads the JSON. It flags them
+with `"strict": false` and the summary says "not in strict feed.all.txt".
 
 ### Network set: recall
 
@@ -186,11 +213,13 @@ BGPView (`api.bgpview.io`) is not used: it has shut down and its domain no longe
   "source": "apnic+radb+ripestat+bgptools+rpki+aws+gcp+azure+ripe-db+crawler-feeds",
   "content_hash": "sha256 of both prefix arrays",
   "prefix_count": 13052,
+  "strict_count": 963,          // ByteDance entries with strict: true
+  "strict_announced": true,     // whether feed.all.txt was filtered to strict entries
   "asns": { "138699": { "provider": "tiktok", "holder": "TIKTOK PTE. LTD." } },
   "prefixes": [   // ByteDance set
     { "prefix": "71.18.252.0/24", "family": "ipv4", "provider": "tiktok", "category": "bytedance",
       "tag": "tiktok", "asn": 138699, "source": "ripestat", "sources": ["ripestat", "bgptools", "radb"],
-      "announced": true, "rpki": "valid" }
+      "announced": true, "rpki": "valid", "strict": true }
   ],
   "networks": {   // network set, kept separate
     "prefix_count": 127398,
@@ -212,6 +241,7 @@ depend on the set:
   - `asn` is the BGP origin if the prefix is announced, otherwise the IRR origin. `asns` appears when
     several ASNs claim the prefix.
   - `announced` is `true` or `false`. `rpki` is `valid`, `invalid` or `not-found`.
+  - `strict` is `true` if the entry is in the strict `feed.all.txt` (see Strict mode).
   - `cloud` (optional) gives the most specific cloud prefix it overlaps, e.g.
     `{ "provider": "oracle", "prefix": "139.177.229.0/24" }`. That example is ByteDance-registered,
     RPKI-authorised space that Oracle announces, which fits TikTok US running on Oracle Cloud.
@@ -252,7 +282,7 @@ This prints one JSON line per IP on **stdout** and a short human-readable summar
 | Confidence | When |
 |---|---|
 | high | Announced in BGP by the network's own ASN, or published by the provider itself (AWS / GCP / Azure / Google / Bing / Apple files) |
-| medium | ByteDance prefix that is RPKI-authorised but not announced; announced but RPKI-invalid; hand-curated; RIPE DB assignments (Bright Data, Oxylabs) |
+| medium | ByteDance prefix that is RPKI-authorised but not announced (mostly excluded from the strict `feed.all.txt`); announced but RPKI-invalid; hand-curated; RIPE DB assignments (Bright Data, Oxylabs) |
 | none | No layer matched |
 
 Run `cat ips.txt | node lookup.js explain` to do the same for one IP per line.
@@ -283,6 +313,7 @@ All sources are fetched in parallel. Each host is only hit sequentially or throu
 
 Environment variables:
 
+- `STRICT_ANNOUNCED=0`: put every ByteDance entry in `feed.all.txt`. The default is `1`, strict.
 - `SKIP_BGPTOOLS=1`: skip bgp.tools (RIPEstat still supplies BGP data).
 - `ALLOW_SHRINK=1`: accept a > 30 % drop in any provider.
 - `FEED_OUT_DIR=…`: write output somewhere else.
@@ -313,9 +344,13 @@ The workflow runs daily at 04:17 UTC and can be started manually from **Actions 
 classification feed → Run workflow**. It declares `contents: write` itself, so no repository setting is
 needed.
 
-To consume the feed, use `https://raw.githubusercontent.com/<owner>/<repo>/main/feed.all.txt`. For a
-private repository, that URL needs a token. GitHub disables scheduled workflows in public repositories
-after 60 days without activity; re-enable it from the Actions tab if that happens.
+To consume the feed:
+
+- Flat file: `https://raw.githubusercontent.com/NicoBroglia/bytedance-ip-feed/main/feed.all.txt` (~3.4 MB)
+- Structured record: `https://raw.githubusercontent.com/NicoBroglia/bytedance-ip-feed/main/bytedance-feed.json` (~23 MB)
+
+GitHub disables scheduled workflows in public repositories after 60 days without activity; re-enable it
+from the Actions tab if that happens.
 
 ## Verifying a prefix is genuinely ByteDance-owned
 

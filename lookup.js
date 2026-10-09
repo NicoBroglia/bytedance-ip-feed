@@ -109,6 +109,7 @@ function explain(ip) {
     sources: best.sources,
   };
   if (best.rpki) match.rpki = best.rpki;
+  if (best.strict !== undefined) match.strict = best.strict; // false = not in the strict feed.all.txt
   if (best.cloud) match.cloud = best.cloud;
   if (best.service) match.service = best.service;
   return {
@@ -127,6 +128,7 @@ function summary(r) {
   const m = r.match;
   const flags = [m.announced === null ? 'BGP not checked' : m.announced ? 'announced' : 'not announced'];
   if (m.rpki) flags.push(`RPKI ${m.rpki}`);
+  if (m.strict === false) flags.push('not in strict feed.all.txt');
   if (m.cloud) flags.push(`inside ${m.cloud.provider} ${m.cloud.prefix}`);
   if (m.service) flags.push(`service ${m.service}`);
   let s = `${r.ip}: ${m.prefix} · ${m.provider}${m.asn ? ` AS${m.asn}` : ''} (${m.holder}) · ${m.category} · ` +

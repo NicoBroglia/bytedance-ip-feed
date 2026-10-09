@@ -61,6 +61,8 @@ const MIN_BYTEDANCE = 100; // fewer ByteDance prefixes than this means something
 const MAX_SHRINK = 0.3; // fail if any provider shrinks by more than 30% vs. the current feed
 const RIPESTAT_CONCURRENCY = 4;
 const SKIP_BGPTOOLS = process.env.SKIP_BGPTOOLS === '1';
+// On by default: feed.all.txt gets only ByteDance prefixes marked `strict` (see the serialise step).
+const STRICT_ANNOUNCED = process.env.STRICT_ANNOUNCED !== '0';
 const ALLOW_SHRINK = process.env.ALLOW_SHRINK === '1';
 
 const CONTACT = process.env.FEED_CONTACT ||
@@ -696,6 +698,7 @@ async function main() {
       sources,
       announced: e.announced,
       rpki: e.rpki,
+      strict: false,
     };
     if (asns.length > 1) out.asns = asns;
     const clouds = cloudOverlap.get(e);
@@ -703,6 +706,9 @@ async function main() {
       const best = clouds.sort((a, b) => b.p.len - a.p.len || a.group.provider.localeCompare(b.group.provider))[0];
       out.cloud = { provider: best.group.provider, prefix: best.p.cidr };
     }
+    // strict = matches live traffic: announced in BGP, hand-curated, or RPKI-valid ByteDance space that a
+    // cloud announces/publishes (e.g. TikTok US routed by Oracle). RPKI-only subdivisions are not strict.
+    out.strict = e.announced || e.sources.has('curated') || (e.rpki === 'valid' && !!clouds);
     return out;
   });
 
@@ -747,6 +753,7 @@ async function main() {
 
   // ======================= Write (only if content changed) =======================
   const contentHash = crypto.createHash('sha256')
+    .update(`strict_announced=${STRICT_ANNOUNCED}\n`)
     .update(JSON.stringify(prefixes)).update('\n').update(JSON.stringify(netPrefixes)).digest('hex');
   if (previous && previous.content_hash === contentHash) {
     log(`unchanged (sha256 ${contentHash.slice(0, 12)}); nothing written (${((Date.now() - started) / 1000).toFixed(0)}s)`);
@@ -766,6 +773,8 @@ async function main() {
     source: 'apnic+radb+ripestat+bgptools+rpki+aws+gcp+azure+ripe-db+crawler-feeds',
     content_hash: contentHash,
     prefix_count: prefixes.length,
+    strict_count: prefixes.filter((p) => p.strict).length,
+    strict_announced: STRICT_ANNOUNCED,
     asns: Object.fromEntries(Object.entries(ASNS).map(([a, v]) => [a, { provider: v.tag, holder: v.holder }])),
   };
   // One entry per line: diffable and ~half the size of fully pretty-printed JSON.
@@ -783,9 +792,10 @@ async function main() {
     '  }\n}\n';
   JSON.parse(json); // never write something we cannot read back
 
-  // Flat file: every entry, "<cidr> <tag>", sorted (family, address, length, category priority).
+  // Flat file: "<cidr> <tag>", sorted (family, address, length, category priority). Identical CIDRs put
+  // ByteDance first, then crawler > relay > vpn > proxy > cloud > hosting: consumers keep the first line.
   const flat = [
-    ...prefixes.map((e) => ({ e, p: parseCidr(e.prefix) })),
+    ...prefixes.filter((e) => !STRICT_ANNOUNCED || e.strict).map((e) => ({ e, p: parseCidr(e.prefix) })),
     ...netPrefixes.map((e) => ({ e, p: parseCidr(e.prefix) })),
   ].sort((a, b) => comparePrefixes(a.p, b.p) ||
     CATEGORY_PRIORITY[a.e.category] - CATEGORY_PRIORITY[b.e.category] || a.e.provider.localeCompare(b.e.provider));
@@ -814,7 +824,8 @@ async function main() {
 
   const byCat = {};
   for (const e of netPrefixes) byCat[e.category] = (byCat[e.category] || 0) + 1;
-  log(`wrote ${prefixes.length} ByteDance prefixes (${prefixes.filter((p) => p.cloud).length} overlap a cloud), ` +
+  log(`wrote ${prefixes.length} ByteDance prefixes (${header.strict_count} strict` +
+    `${STRICT_ANNOUNCED ? ', only those in feed.all.txt' : ''}; ${prefixes.filter((p) => p.cloud).length} overlap a cloud), ` +
     `${netPrefixes.length} network prefixes ${JSON.stringify(byCat)}, ${txtLines.length} lines in feed.all.txt, ` +
     `sha256 ${contentHash.slice(0, 12)} (${((Date.now() - started) / 1000).toFixed(0)}s)`);
 }
